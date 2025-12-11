@@ -8,11 +8,11 @@ import { Pool } from "pg";
 dotenv.config();
 
 const PORT = process.env.PORT || 4000;
-const POSTGRESS_URL = process.env.POSTGRESS_URL || process.env.DATABASE_URL || process.env.PG_URL;
+const POSTGRES_URL = process.env.POSTGRES_URL || process.env.DATABASE_URL || process.env.PG_URL;
 const API_KEY = process.env.API_KEY || "devkey";
 
-if (!POSTGRESS_URL) {
-  console.error("PG_URL / DATABASE_URL / POSTGRESS_URL missing in env");
+if (!POSTGRES_URL) {
+  console.error("PG_URL / DATABASE_URL / POSTGRES_URL missing in env");
   // do not exit in production — let requests return 503 if DB isn't configured
   if (process.env.NODE_ENV !== "production") {
     process.exit(1);
@@ -27,7 +27,7 @@ app.use(express.json());
 // across serverless invocations.
 const createPool = () =>
   new Pool({
-    connectionString: POSTGRESS_URL,
+    connectionString: POSTGRES_URL,
     ssl: {
       // Supabase requires SSL; accept the server cert (common for managed PG)
       rejectUnauthorized: false,
