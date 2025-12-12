@@ -8,12 +8,11 @@ import { Pool } from "pg";
 dotenv.config();
 
 const PORT = process.env.PORT || 4000;
-const POSTGRES_URL = process.env.POSTGRES_URL || process.env.DATABASE_URL || process.env.PG_URL;
+const POSTGRESS_URL = process.env.POSTGRES_URL;
 const API_KEY = process.env.API_KEY || "devkey";
 
-if (!POSTGRES_URL) {
-  console.error("PG_URL / DATABASE_URL / POSTGRES_URL missing in env");
-  // do not exit in production — let requests return 503 if DB isn't configured
+if (!POSTGRESS_URL) {
+  console.error("PG_URL / DATABASE_URL missing in env");
   if (process.env.NODE_ENV !== "production") {
     process.exit(1);
   }
@@ -22,41 +21,30 @@ if (!POSTGRES_URL) {
 const app = express();
 app.use(express.json());
 
-// ---------- Postgres pool (cached) ----------
-// Important: use a single global cached pool to avoid creating many connections
-// across serverless invocations.
-const createPool = () =>
-  new Pool({
-    connectionString: POSTGRES_URL,
-    ssl: {
-      // Supabase requires SSL; accept the server cert (common for managed PG)
-      rejectUnauthorized: false,
-    },
-    max: Number(process.env.PG_MAX_CLIENTS || 2), // keep small for serverless
-    idleTimeoutMillis: 3000,
-    connectionTimeoutMillis: 5000,
+// ---------- Postgres pool ----------
+const pool = new Pool({
+  connectionString: process.env.POSTGRES_URL,
+  ssl: {
+    rejectUnauthorized: false,
+  },
+  max: 5, // limit pool
+  idleTimeoutMillis: 3000,   // close idle fast
+  connectionTimeoutMillis: 5000,
+});
+
+// Optional: Verify connection at startup (non-blocking)
+pool
+  .connect()
+  .then((c) => {
+    c.release();
+    console.log("Connected to Postgres");
+  })
+  .catch((err) => {
+    console.error("Postgres connection error:", err.message);
+    if (process.env.NODE_ENV !== "production") process.exit(1);
   });
 
-let pool = global._pgPool;
-if (!pool) {
-  pool = createPool();
-  global._pgPool = pool;
-}
 
-// Optional: do a non-blocking test connection in non-production to surface issues early
-if (process.env.NODE_ENV !== "production") {
-  pool
-    .connect()
-    .then((client) => {
-      client.release();
-      console.log("Connected to Postgres (dev/test).");
-    })
-    .catch((err) => {
-      console.error("Postgres connection error (dev):", err.message || err);
-    });
-}
-
-// ---------- Utility functions (kept your originals) ----------
 const PLAN_MAP = {
   entry: { amount: 100, valid_days: 10 },
   silver: { amount: 1770, valid_days: 90 },
@@ -64,15 +52,25 @@ const PLAN_MAP = {
   platinum: { amount: 4720, valid_days: 365 },
 };
 
+// ---------- Utilities (date parsing & plan calculations) ----------
 function parseAnyDate(value) {
+  // If falsy or null -> return current date (matching your original behavior)
   if (!value) return new Date();
+
   if (value instanceof Date && !isNaN(value)) return value;
+
+  // If value is already a number (timestamp)
   if (!isNaN(value) && String(value).length >= 10) {
     const num = Number(value);
+    // treat as ms if big, else sec -> ms
     return new Date(num > 1e12 ? num : num * 1000);
   }
+
+  // Try direct Date parse first
   const direct = new Date(value);
   if (!isNaN(direct)) return direct;
+
+  // DMY pattern 01-02-2000 or 1/2/2000
   const dmy = /^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/;
   if (dmy.test(value)) {
     const m = value.match(dmy);
@@ -81,6 +79,8 @@ function parseAnyDate(value) {
     const y = m[3];
     return new Date(`${y}-${mo}-${d}`);
   }
+
+  // 1-Jan-20 or 1-Jan-2020
   const dmy2 = /^(\d{1,2})[-/](\w{3,})[-/](\d{2,4})$/i;
   if (dmy2.test(value)) {
     const m = value.match(dmy2);
@@ -88,8 +88,11 @@ function parseAnyDate(value) {
     let mon = m[2];
     let y = m[3];
     if (y.length === 2) y = "20" + y;
+    // format "1 Jan 2020"
     return new Date(`${d} ${mon} ${y}`);
   }
+
+  // fallback
   return new Date();
 }
 
@@ -112,7 +115,7 @@ function getplan_status(expiry_date) {
   return exp < today ? "expired" : "active";
 }
 
-// mapping helpers (kept your long mapping; corrected small typos)
+// mapping helpers: convert DB row (snake_case) -> API object (camelCase)
 function rowToUser(row) {
   if (!row) return null;
   return {
@@ -185,71 +188,74 @@ function rowToUser(row) {
   };
 }
 
+// convert incoming camelCase body to DB column array for insert/update
 function buildInsertColumnsAndValues(body) {
+  // allowed fields to write (only include keys that exist)
   const mapping = {
     regno: "regno",
-    name: "name",
-    gender: "gender",
-    caste: "caste",
-    caste_category: "caste_category",
-    gothram: "gothram",
-    food_habits: "food_habits",
-    reg_date: "reg_date",
-    plan: "plan",
-    amount: "amount",
-    payment_mode: "payment_mode",
-    transaction_id: "transaction_id",
-    valid_days: "valid_days",
-    expiry_date: "expiry_date",
-    plan_status: "plan_status",
-    new_or_renewal: "new_or_renewal",
-    marital_status: "marital_status",
-    dob: "dob",
-    yob: "yob",
-    age: "age",
-    time_of_birth: "time_of_birth",
-    place_of_birth: "place_of_birth",
-    height: "height",
-    weight: "weight",
-    star: "star",
-    paadham: "paadham",
-    rasi: "rasi",
-    lagnam: "lagnam",
-    dosham: "dosham",
-    education: "education",
-    ug_degree: "ug_degree",
-    ug_specialization: "ug_specialization",
-    pg_degree: "pg_degree",
-    pg_specialization: "pg_specialization",
-    occupation: "occupation",
-    annual_income: "annual_income",
-    father_name: "father_name",
-    father_occupation: "father_occupation",
-    mother_name: "mother_name",
-    mother_occupation: "mother_occupation",
-    sibling_details: "sibling_details",
-    native_place: "native_place",
-    current_residence: "current_residence",
-    address: "address",
-    city: "city",
-    pincode: "pincode",
-    state: "state",
-    country: "country",
-    ownHouse: "ownHouse",
-    property_details: "property_details",
-    expectations: "expectations",
-    remarks: "remarks",
-    flashed_date: "flashed_date",
-    renewal_date: "renewal_date",
-    renewal_amount: "renewal_amount",
-    contact1: "contact1",
-    contact2: "contact2",
-    contact3: "contact3",
-    email: "email",
-    created_by: "created_by",
-    modified_by: "modified_by",
-    deleted_by: "deleted_by",
-    is_deleted: "is_deleted",
+name: "name",
+gender: "gender",
+caste: "caste",
+caste_category: "caste_category",
+gothram: "gothram",
+food_habits: "food_habits",
+reg_date: "reg_date",
+plan: "plan",
+amount: "amount",
+payment_mode: "payment_mode",
+transaction_id: "transaction_id",
+valid_days: "valid_days",
+expiry_date: "expiry_date",
+plan_status: "plan_status",
+new_or_renewal: "new_or_renewal",
+marital_status: "marital_status",
+dob: "dob",
+yob: "yob",
+age: "age",
+time_of_birth: "time_of_birth",
+place_of_birth: "place_of_birth",
+height: "height",
+weight: "weight",
+star: "star",
+paadham: "paadham",
+rasi: "rasi",
+lagnam: "lagnam",
+dosham: "dosham",
+education: "education",
+ug_degree: "ug_degree",
+ug_specialization: "ug_specialization",
+pg_degree: "pg_degree",
+pg_specialization: "pg_specialization",
+occupation: "occupation",
+annual_income: "annual_income",
+father_name: "father_name",
+fatherccupation: "father_occupation",
+mother_name: "mother_name",
+mother_occupation: "mother_occupation",
+sibling_details: "sibling_details",
+native_place: "native_place",
+current_residence: "current_residence",
+address: "address",
+city: "city",
+pincode: "pincode",
+state: "state",
+country: "country",
+ownHouse: "ownHouse",
+property_details: "property_details",
+expectations: "expectations",
+remarks: "remarks",
+flashed_date: "flashed_date",
+renewal_date: "renewal_date",
+renewal_amount: "renewal_amount",
+contact1: "contact1",
+contact2: "contact2",
+contact3: "contact3",
+email: "email",
+created_by: "created_by",
+modified_by: "modified_by",
+deleted_by: "deleted_by",
+is_deleted: "is_deleted"
+
   };
 
   const cols = [];
@@ -287,6 +293,7 @@ app.use(
 );
 
 app.use((req, res, next) => {
+  // allow preflight through
   if (req.method === "OPTIONS") return next();
 
   const key = req.header("x-api-key");
@@ -296,14 +303,15 @@ app.use((req, res, next) => {
   next();
 });
 
-// DB check middleware (simple ping)
+// DB check middleware (calls pool.query simple ping)
 app.use(async (req, res, next) => {
   if (req.method === "OPTIONS") return next();
   try {
+    // simple query to ensure pool is available
     await pool.query("SELECT 1");
     next();
   } catch (err) {
-    console.error("DB connect error in middleware:", err.message || err);
+    console.error("DB connect error in middleware:", err.message);
     return res.status(503).json({ message: "DB connection unavailable" });
   }
 });
@@ -756,13 +764,12 @@ app.use((req, res) => {
   res.status(404).json({ message: `Route not found: ${req.method} ${req.originalUrl}` });
 });
 
-// IMPORTANT: only start a standalone server when explicitly requested.
-// For Vercel serverless deployments you should NOT call app.listen — instead
-// export the app or create a serverless wrapper as required by your platform.
-if (process.env.STANDALONE === "true") {
+app.listen()
+
+export default app
+// If you want to run directly with `node app.js` uncomment below:
+if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
   });
 }
-
-export default app;
