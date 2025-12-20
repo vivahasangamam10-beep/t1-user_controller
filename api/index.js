@@ -188,92 +188,6 @@ function rowToUser(row) {
   };
 }
 
-// convert incoming camelCase body to DB column array for insert/update
-function buildInsertColumnsAndValues(body) {
-  // allowed fields to write (only include keys that exist)
-  const mapping = {
-    regno: "regno",
-name: "name",
-gender: "gender",
-caste: "caste",
-caste_category: "caste_category",
-gothram: "gothram",
-food_habits: "food_habits",
-reg_date: "reg_date",
-plan: "plan",
-amount: "amount",
-payment_mode: "payment_mode",
-transaction_id: "transaction_id",
-valid_days: "valid_days",
-expiry_date: "expiry_date",
-plan_status: "plan_status",
-new_or_renewal: "new_or_renewal",
-marital_status: "marital_status",
-dob: "dob",
-yob: "yob",
-age: "age",
-time_of_birth: "time_of_birth",
-place_of_birth: "place_of_birth",
-height: "height",
-weight: "weight",
-star: "star",
-paadham: "paadham",
-rasi: "rasi",
-lagnam: "lagnam",
-dosham: "dosham",
-education: "education",
-ug_degree: "ug_degree",
-ug_specialization: "ug_specialization",
-pg_degree: "pg_degree",
-pg_specialization: "pg_specialization",
-occupation: "occupation",
-annual_income: "annual_income",
-father_name: "father_name",
-fatherccupation: "father_occupation",
-mother_name: "mother_name",
-mother_occupation: "mother_occupation",
-sibling_details: "sibling_details",
-native_place: "native_place",
-current_residence: "current_residence",
-address: "address",
-city: "city",
-pincode: "pincode",
-state: "state",
-country: "country",
-ownHouse: "ownHouse",
-property_details: "property_details",
-expectations: "expectations",
-remarks: "remarks",
-flashed_date: "flashed_date",
-renewal_date: "renewal_date",
-renewal_amount: "renewal_amount",
-contact1: "contact1",
-contact2: "contact2",
-contact3: "contact3",
-email: "email",
-created_by: "created_by",
-modified_by: "modified_by",
-deleted_by: "deleted_by",
-is_deleted: "is_deleted"
-
-  };
-
-  const cols = [];
-  const placeholders = [];
-  const values = [];
-  let idx = 1;
-
-  for (const [key, col] of Object.entries(mapping)) {
-    if (Object.prototype.hasOwnProperty.call(body, key) && body[key] !== undefined) {
-      cols.push(`"${col}"`);
-      placeholders.push(`$${idx}`);
-      values.push(body[key]);
-      idx++;
-    }
-  }
-
-  return { cols, placeholders, values };
-}
 
 // ---------- Middleware: CORS + API Key ----------
 app.use(
@@ -333,49 +247,134 @@ async function updateplan_statusInDB(row) {
 }
 
 // ---------- POST /api/users (create) ----------
+
 app.post("/api/users", async (req, res) => {
   try {
     const body = { ...req.body };
 
-    // Normalize dates
+    // -------------------- Normalize dates --------------------
     if (body.reg_date) body.reg_date = parseAnyDate(body.reg_date);
     if (body.dob) body.dob = parseAnyDate(body.dob);
     if (body.flashed_date) body.flashed_date = parseAnyDate(body.flashed_date);
     if (body.renewal_date) body.renewal_date = parseAnyDate(body.renewal_date);
 
-    // plan calc
+    // -------------------- Plan calculation --------------------
     const plan = (body.plan || "entry").toLowerCase();
-    const { expiry_date, amount, valid_days } = calculateexpiry_date(body.reg_date, plan);
+    const { expiry_date, amount, valid_days } =
+      calculateexpiry_date(body.reg_date, plan);
 
     body.amount = amount;
     body.valid_days = valid_days;
     body.expiry_date = expiry_date;
     body.plan_status = getplan_status(expiry_date).toLowerCase();
 
-    // Build insert
-    const { cols, placeholders, values } = buildInsertColumnsAndValues(body);
+    // -------------------- SYSTEM VALUES (FORCED) --------------------
+    body.is_deleted = false;       // ✅ FORCE
+    body.created_at = new Date();  // ✅ FORCE
 
-    // keep created_at/updateAt default in DB; but we can include created_by etc if provided
-    if (cols.length === 0) return res.status(400).json({ message: "No fields provided for creation" });
+    // -------------------- COLUMN MAP (MATCHES DB EXACTLY) --------------------
+    const mapping = {
+      regno: "regno",
+      name: "name",
+      gender: "gender",
+      caste: "caste",
+      caste_category: "caste_category",
+      gothram: "gothram",
+      food_habits: "food_habits",
+      reg_date: "reg_date",
+      plan: "plan",
+      amount: "amount",
+      payment_mode: "payment_mode",
+      transaction_id: "transaction_id",
+      valid_days: "valid_days",
+      expiry_date: "expiry_date",
+      plan_status: "plan_status",
+      new_or_renewal: "new_or_renewal",
+      marital_status: "marital_status",
+      dob: "dob",
+      yob: "yob",
+      age: "age",
+      time_of_birth: "time_of_birth",
+      place_of_birth: "place_of_birth",
+      height: "height",
+      weight: "weight",
+      star: "star",
+      paadham: "paadham",
+      rasi: "rasi",
+      lagnam: "lagnam",
+      dosham: "dosham",
+      education: "education",
+      ug_degree: "ug_degree",
+      ug_specialization: "ug_specialization",
+      pg_degree: "pg_degree",
+      pg_specialization: "pg_specialization",
+      occupation: "occupation",
+      annual_income: "annual_income",
+      father_name: "father_name",
+      father_occupation: "father_occupation",
+      mother_name: "mother_name",
+      mother_occupation: "mother_occupation",
+      sibling_details: "sibling_details",
+      native_place: "native_place",
+      current_residence: "current_residence",
+      address: "address",
+      city: "city",
+      pincode: "pincode",
+      state: "state",
+      country: "country",
+      own_house: "own_house",              // ✅ FIXED
+      property_details: "property_details",
+      expectations: "expectations",
+      remarks: "remarks",
+      flashed_date: "flashed_date",
+      renewal_date: "renewal_date",
+      renewal_amount: "renewal_amount",
+      contact1: "contact1",
+      contact2: "contact2",
+      contact3: "contact3",
+      email: "email",
+      created_by: "created_by",
+      is_deleted: "is_deleted",             // ✅ SYSTEM
+      created_at: "created_at"              // ✅ SYSTEM
+    };
 
-    const sql = `INSERT INTO t1."T1_USERS" (${cols.join(", ")}) VALUES (${placeholders.join(
-      ", "
-    )}) RETURNING *`;
+    // -------------------- BUILD INSERT SAFELY --------------------
+    const cols = [];
+    const values = [];
+    const placeholders = [];
+
+    Object.entries(mapping).forEach(([key, col]) => {
+      if (body[key] !== undefined) {
+        cols.push(`"${col}"`);
+        values.push(body[key]);
+        placeholders.push(`$${values.length}`);
+      }
+    });
+
+    if (!cols.length) {
+      return res.status(400).json({ message: "No fields provided" });
+    }
+
+    const sql = `
+      INSERT INTO t1."T1_USERS" (${cols.join(", ")})
+      VALUES (${placeholders.join(", ")})
+      RETURNING *
+    `;
 
     const { rows } = await pool.query(sql, values);
-    const inserted = rows[0];
-    return res.status(201).json(rowToUser(inserted));
+    res.status(201).json(rowToUser(rows[0]));
+
   } catch (err) {
-    // duplicate regno -> PG code 23505
-    if (err && err.code === "23505") {
-      return res.status(409).json({ message: "Duplicate registration number (regno)" });
+    if (err.code === "23505") {
+      return res.status(409).json({ message: "Duplicate regno" });
     }
     console.error("POST /api/users error:", err);
-    return res.status(500).json({ message: "Server error during creation" });
+    res.status(500).json({ message: err.message });
   }
 });
 
-// ---------- GET /api/users (list + search + filters + pagination) ----------
+
+
 app.get("/api/users", async (req, res) => {
   try {
     const {
@@ -388,44 +387,60 @@ app.get("/api/users", async (req, res) => {
       gender,
       education,
       marital_status,
+
+      gothram,
+      height,
+      weight,
+      star,
+      rasi,
+      dosham,
+      occupation,
+      annual_income,
+      dob,
+
       page = 1,
       limit = 100,
     } = req.query;
 
-    const filters = [`is_deleted = '0' `];
+    const filters = [`is_deleted = false`];
     const params = [];
     let idx = 1;
 
-    // Global q search: regno (int) or text on name/email/phone/currentResidance/caste
+    // ---------- GLOBAL SEARCH ----------
     if (q) {
       const numeric = parseInt(q, 10);
       const orClauses = [];
+
       if (!isNaN(numeric)) {
         orClauses.push(`regno = $${idx}`);
         params.push(numeric);
         idx++;
-      } else {
-        // push a dummy to keep numbering consistent? not needed
       }
-      // text matches
+
       orClauses.push(`name ILIKE $${idx}`);
       params.push(`%${q}%`);
       idx++;
+
       orClauses.push(`email ILIKE $${idx}`);
       params.push(`%${q}%`);
       idx++;
+
       orClauses.push(`contact1 ILIKE $${idx}`);
       params.push(`%${q}%`);
       idx++;
+
       orClauses.push(`currentResidance ILIKE $${idx}`);
       params.push(`%${q}%`);
       idx++;
+
       orClauses.push(`caste ILIKE $${idx}`);
       params.push(`%${q}%`);
       idx++;
+
       filters.push(`(${orClauses.join(" OR ")})`);
     }
 
+    // ---------- SIMPLE EQUAL FILTERS ----------
     if (plan) {
       filters.push(`plan = $${idx}`);
       params.push(plan);
@@ -438,67 +453,86 @@ app.get("/api/users", async (req, res) => {
       idx++;
     }
 
-    if (caste) {
-      const casteValues = caste.split(",").map((s) => s.trim()).filter(Boolean);
-      if (casteValues.length > 0) {
-        const inPlaceholders = casteValues.map(() => `$${idx++}`);
-        params.push(...casteValues);
-        filters.push(`caste IN (${inPlaceholders.join(", ")})`);
-      }
-    }
-
-    if (yob) {
-      const yobValues = String(yob)
-        .split(",")
-        .map((s) => parseInt(s, 10))
-        .filter((n) => !isNaN(n));
-      if (yobValues.length > 0) {
-        const inPlaceholders = yobValues.map(() => `$${idx++}`);
-        params.push(...yobValues);
-        filters.push(`yob IN (${inPlaceholders.join(", ")})`);
-      }
-    }
-
     if (gender) {
       filters.push(`gender = $${idx}`);
       params.push(gender);
       idx++;
     }
+
     if (education) {
       filters.push(`education = $${idx}`);
       params.push(education);
       idx++;
     }
+
     if (marital_status) {
       filters.push(`marital_status = $${idx}`);
       params.push(marital_status);
       idx++;
     }
+
     if (currentResidingLocation) {
       filters.push(`currentResidance ILIKE $${idx}`);
       params.push(`%${currentResidingLocation}%`);
       idx++;
     }
 
+    // ---------- MULTI SELECT FILTERS ----------
+    const addMultiFilter = (column, value) => {
+      const values = String(value)
+        .split(",")
+        .map(v => v.trim())
+        .filter(Boolean);
+
+      if (values.length) {
+        const placeholders = values.map(() => `$${idx++}`);
+        params.push(...values);
+        filters.push(`${column} IN (${placeholders.join(", ")})`);
+      }
+    };
+
+    if (caste) addMultiFilter("caste", caste);
+    if (yob) addMultiFilter("yob", yob);
+    if (gothram) addMultiFilter("gothram", gothram);
+    if (height) addMultiFilter("height", height);
+    if (weight) addMultiFilter("weight", weight);
+    if (star) addMultiFilter("star", star);
+    if (rasi) addMultiFilter("rasi", rasi);
+    if (dosham) addMultiFilter("dosham", dosham);
+    if (occupation) addMultiFilter("occupation", occupation);
+    if (annual_income) addMultiFilter("annual_income", annual_income);
+
+    // ---------- DOB (STRING OR TIMESTAMP) ----------
+    if (dob) {
+      filters.push(`DATE(dob) = DATE($${idx})`);
+      params.push(dob);
+      idx++;
+    }
+
     const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
 
     const pageInt = Math.max(1, parseInt(page, 10) || 1);
-    const perPage = Math.max(1, Math.min(1000, parseInt(limit, 10) || 100));
+    const perPage = Math.min(1000, Math.max(1, parseInt(limit, 10) || 100));
     const offset = (pageInt - 1) * perPage;
 
-    // total count
+    // ---------- TOTAL COUNT ----------
     const countSql = `SELECT COUNT(*)::int AS total FROM t1."T1_USERS" ${where}`;
     const countRes = await pool.query(countSql, params);
-    const total = countRes.rows[0] ? parseInt(countRes.rows[0].total, 10) : 0;
+    const total = countRes.rows[0]?.total || 0;
 
-    // main fetch sorted by created_at desc
-    const dataSql = `SELECT * FROM t1."T1_USERS" ${where} ORDER BY created_at DESC LIMIT $${idx} OFFSET $${idx + 1}`;
-    const finalParams = params.slice();
-    finalParams.push(perPage, offset);
+    // ---------- MAIN QUERY ----------
+    const dataSql = `
+      SELECT *
+      FROM t1."T1_USERS"
+      ${where}
+      ORDER BY created_at DESC
+      LIMIT $${idx} OFFSET $${idx + 1}
+    `;
 
+    const finalParams = [...params, perPage, offset];
     const { rows } = await pool.query(dataSql, finalParams);
 
-    // For each row update plan_status in DB if changed (like original)
+    // ---------- POST PROCESS ----------
     const users = [];
     for (const r of rows) {
       const currentStatus = await updateplan_statusInDB(r);
@@ -520,6 +554,125 @@ app.get("/api/users", async (req, res) => {
   }
 });
 
+// ============ GET FILTER OPTIONS ============
+
+app.get("/api/users/filters", async (req, res) => {
+  try {
+    const queries = {
+      caste: `
+        SELECT DISTINCT caste 
+        FROM t1."T1_USERS"
+        WHERE caste IS NOT NULL AND caste <> ''
+        ORDER BY caste
+      `,
+      gothram: `
+        SELECT DISTINCT gothram
+        FROM t1."T1_USERS"
+        WHERE gothram IS NOT NULL AND gothram <> ''
+        ORDER BY gothram
+      `,
+      height: `
+        SELECT DISTINCT height
+        FROM t1."T1_USERS"
+        WHERE height IS NOT NULL AND height <> ''
+        ORDER BY height
+      `,
+      weight: `
+        SELECT DISTINCT weight
+        FROM t1."T1_USERS"
+        WHERE weight IS NOT NULL AND weight <> ''
+        ORDER BY weight
+      `,
+      star: `
+        SELECT DISTINCT star
+        FROM t1."T1_USERS"
+        WHERE star IS NOT NULL AND star <> ''
+        ORDER BY star
+      `,
+      rasi: `
+        SELECT DISTINCT rasi
+        FROM t1."T1_USERS"
+        WHERE rasi IS NOT NULL AND rasi <> ''
+        ORDER BY rasi
+      `,
+      dosham: `
+        SELECT DISTINCT dosham
+        FROM t1."T1_USERS"
+        WHERE dosham IS NOT NULL AND dosham <> ''
+        ORDER BY dosham
+      `,
+      occupation: `
+        SELECT DISTINCT occupation
+        FROM t1."T1_USERS"
+        WHERE occupation IS NOT NULL AND occupation <> ''
+        ORDER BY occupation
+      `,
+      annual_income: `
+        SELECT DISTINCT annual_income
+        FROM t1."T1_USERS"
+        WHERE annual_income IS NOT NULL AND annual_income <> ''
+        ORDER BY annual_income
+      `,
+      education: `
+        SELECT DISTINCT education
+        FROM t1."T1_USERS"
+        WHERE education IS NOT NULL AND education <> ''
+        ORDER BY education
+      `,
+      gender: `
+        SELECT DISTINCT gender
+        FROM t1."T1_USERS"
+        WHERE gender IS NOT NULL AND gender <> ''
+        ORDER BY gender
+      `,
+      marital_status: `
+        SELECT DISTINCT marital_status
+        FROM t1."T1_USERS"
+        WHERE marital_status IS NOT NULL AND marital_status <> ''
+        ORDER BY marital_status
+      `,
+      yob: `
+        SELECT DISTINCT yob
+        FROM t1."T1_USERS"
+        WHERE yob IS NOT NULL
+        ORDER BY yob
+      `,
+      dob: `
+        SELECT DISTINCT
+          CASE
+            WHEN dob::text ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+              THEN dob::date
+            ELSE NULL
+          END AS dob
+        FROM t1."T1_USERS"
+        WHERE dob IS NOT NULL
+        ORDER BY dob
+      `,
+      current_residence: `
+        SELECT DISTINCT current_residence
+        FROM t1."T1_USERS"
+        WHERE current_residence IS NOT NULL AND current_residence <> ''
+        ORDER BY current_residence
+      `
+    };
+
+    const results = {};
+
+    for (const key of Object.keys(queries)) {
+      const { rows } = await pool.query(queries[key]);
+      results[key] = rows
+        .map(r => Object.values(r)[0])
+        .filter(v => v !== null);
+    }
+
+    res.json(results);
+  } catch (err) {
+    console.error("GET /api/users/filters error:", err);
+    res.status(500).json({ message: "Failed to load filter options" });
+  }
+});
+
+
 // ---------- GET /api/users/renewals-due ----------
 app.get("/api/users/renewals-due", async (req, res) => {
   try {
@@ -531,7 +684,7 @@ app.get("/api/users/renewals-due", async (req, res) => {
     limitDate.setDate(today.getDate() + days);
 
     // fetch users with expiry_date not null and not deleted
-    const sql = `SELECT * FROM t1."T1_USERS" WHERE is_deleted = '0' AND expiry_date IS NOT NULL`;
+    const sql = `SELECT * FROM t1."T1_USERS" WHERE is_deleted = false AND expiry_date IS NOT NULL`;
     const { rows } = await pool.query(sql);
 
     const dueUsers = rows
@@ -571,7 +724,7 @@ app.get("/api/users/check-regno/:regno", async (req, res) => {
 });
 
 // ---------- GET /api/users/:id ----------
-app.get("/api/users/:id", async (req, res) => {
+app.get("/api/users/:regno", async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
@@ -714,7 +867,7 @@ app.put("/api/users/:regno", async (req, res) => {
     const sql = `
       UPDATE t1."T1_USERS"
       SET ${setParts.join(", ")}
-      WHERE regno = $${idx} AND is_deleted = '0'
+      WHERE regno = $${idx} AND is_deleted = false
       RETURNING *
     `;
     values.push(regno);
@@ -743,7 +896,7 @@ app.patch("/api/users/:regno/delete", async (req, res) => {
 
     const sql = `
       UPDATE t1."T1_USERS"
-      SET is_deleted = '1', "updated_at" = now(), deleted_by = $1
+      SET is_deleted = true, "updated_at" = now(), deleted_by = $1
       WHERE regno = $2
       RETURNING *
     `;
@@ -763,8 +916,6 @@ app.patch("/api/users/:regno/delete", async (req, res) => {
 app.use((req, res) => {
   res.status(404).json({ message: `Route not found: ${req.method} ${req.originalUrl}` });
 });
-
-app.listen()
 
 export default app
 // If you want to run directly with `node app.js` uncomment below:
